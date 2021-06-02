@@ -1,0 +1,213 @@
+AWSTemplateFormatVersion: 2010-09-09
+Parameters:
+  DBInstanceID:
+    Default: mydbinstance
+    Description: My database instance
+    Type: String
+    MinLength: '1'
+    MaxLength: '63'
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: >-
+      Must begin with a letter and must not end with a hyphen or contain two
+      consecutive hyphens.
+  DBName:
+    Default: mydb
+    Description: My database
+    Type: String
+    MinLength: '1'
+    MaxLength: '64'
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: Must begin with a letter and contain only alphanumeric characters.
+  DBInstanceClass:
+    Default: db.t2.micro
+    Description: DB instance class
+    Type: String
+    ConstraintDescription: Must select a valid DB instance type.
+  DBAllocatedStorage:
+    Default: '10'
+    Description: The size of the database (GiB)
+    Type: Number
+    MinValue: '5'
+    MaxValue: '1024'
+    ConstraintDescription: must be between 20 and 65536 GiB.
+  DBUsername:
+    NoEcho: 'true'
+    Description: Username for MySQL database access
+    Type: String
+    MinLength: '1'
+    MaxLength: '16'
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: must begin with a letter and contain only alphanumeric characters.
+  DBPassword:
+    NoEcho: 'true'
+    Description: Password MySQL database access
+    Type: String
+    MinLength: '8'
+    MaxLength: '41'
+    AllowedPattern: '[a-zA-Z0-9]*'
+    ConstraintDescription: must contain only alphanumeric characters.
+Resources:
+  NewVPC:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      CidrBlock: 10.100.0.0/16
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+      InstanceTenancy: default
+      Tags:
+        - Key: Name
+          Value: NewVPC
+  FrontendSubnet1:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      AvailabilityZone: us-east-1a
+      CidrBlock: 10.100.0.0/24
+      MapPublicIpOnLaunch: 'true'
+      Tags:
+        - Key: Name
+          Value: FrontEndSubnet1
+      VpcId: !Ref NewVPC
+  BackendSubnet1:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      AvailabilityZone: us-east-1a
+      CidrBlock: 10.100.1.0/24
+      MapPublicIpOnLaunch: 'false'
+      Tags:
+        - Key: Name
+          Value: BackendSubnet1
+      VpcId: !Ref NewVPC
+  FrontendSubnet2:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      AvailabilityZone: us-east-1b
+      CidrBlock: 10.100.2.0/24
+      MapPublicIpOnLaunch: 'true'
+      Tags:
+        - Key: Name
+          Value: FrontendSubnet2
+      VpcId: !Ref NewVPC
+  BackendSubnet2:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      AvailabilityZone: us-east-1b
+      CidrBlock: 10.100.3.0/24
+      MapPublicIpOnLaunch: 'false'
+      Tags:
+        - Key: Name
+          Value: BackendSubnet2
+      VpcId: !Ref NewVPC
+  InternetGateway:
+    Type: 'AWS::EC2::InternetGateway'
+    Properties:
+      Tags:
+        - Key: Name
+          Value: InternetGateway
+  VPCInternetGatewayAccociate:
+    Type: 'AWS::EC2::VPCGatewayAttachment'
+    Properties:
+      VpcId: !Ref NewVPC
+      InternetGatewayId: !Ref InternetGateway
+  PublicRouteTable:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref NewVPC
+      Tags:
+        - Key: Name
+          Value: PublicRouteTable
+  PublicRoute:
+    Type: 'AWS::EC2::Route'
+    DependsOn: VPCInternetGatewayAccociate
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+  Frontend1RouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref FrontendSubnet1
+      RouteTableId: !Ref PublicRouteTable
+  Frontend2RouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref FrontendSubnet2
+      RouteTableId: !Ref PublicRouteTable
+  NatGateway:
+    Type: 'AWS::EC2::NatGateway'
+    DependsOn: NatPublicIP
+    Properties:
+      AllocationId: !GetAtt 
+        - NatPublicIP
+        - AllocationId
+      SubnetId: !Ref FrontendSubnet1
+  NatPublicIP:
+    Type: 'AWS::EC2::EIP'
+    DependsOn: NewVPC
+    Properties:
+      Domain: vpc
+  PrivateRouteTable:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref NewVPC
+      Tags:
+        - Key: Name
+          Value: PrivateRouteTable
+  PrivateRoute:
+    Type: 'AWS::EC2::Route'
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+  Backend1RouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref BackendSubnet1
+      RouteTableId: !Ref PrivateRouteTable
+  Backend2RouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref BackendSubnet2
+      RouteTableId: !Ref PrivateRouteTable
+  DBSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: DB Instance Security Group
+      VpcId: !Ref NewVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: 0.0.0.0/0
+  myDBSubnetGroup:
+    Type: 'AWS::RDS::DBSubnetGroup'
+    Properties:
+      DBSubnetGroupDescription: ChatappDB Subnet Group
+      SubnetIds:
+        - !Ref BackendSubnet1
+        - !Ref BackendSubnet2
+      Tags:
+        - Key: Name
+          Value: myDBSubnetGroup
+  ChatappDB:
+    Type: 'AWS::RDS::DBInstance'
+    Properties:
+      DBInstanceIdentifier: !Ref DBInstanceID
+      DBName: !Ref DBName
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: !Ref DBAllocatedStorage
+      Engine: MySQL
+      EngineVersion: 8.0.20
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      DBSubnetGroupName: !Ref myDBSubnetGroup
+      AvailabilityZone: us-east-1a
+      VPCSecurityGroups:
+        - !Ref DBSecurityGroup
+      Tags:
+        - Key: Name
+          Value: ChatappDB

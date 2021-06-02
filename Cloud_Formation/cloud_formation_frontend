@@ -1,0 +1,108 @@
+AWSTemplateFormatVersion: 2010-09-09
+Resources:
+  FrontendSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Frontend Instance Security Group
+      VpcId: vpc-01db5fa24d42d7539
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: 0.0.0.0/0
+  FrontendELBSG:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Frontend Instance Security Group
+      VpcId: vpc-01db5fa24d42d7539
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: 0.0.0.0/0
+  ExternalLoadBalancer:
+    Type: 'AWS::ElasticLoadBalancingV2::LoadBalancer'
+    Properties:
+      Scheme: internet-facing
+      Subnets:
+        - subnet-05a5fda8fa51783e3
+        - subnet-00c2205feb553526c
+      SecurityGroups:
+        - !Ref FrontendELBSG
+      Tags:
+        - Key: Name
+          Value: EXternalLoadBalancer
+  ExternalTargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      Port: '80'
+      Protocol: HTTP
+      VpcId: vpc-01db5fa24d42d7539
+  Listener:
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref ExternalTargetGroup
+      LoadBalancerArn: !Ref ExternalLoadBalancer
+      Port: '80'
+      Protocol: HTTP
+  ChatappLaunchConfig:
+    Type: 'AWS::AutoScaling::LaunchConfiguration'
+    Properties:
+      ImageId: ami-01eef4604b9124f74
+      SecurityGroups:
+        - !Ref FrontendSecurityGroup
+      InstanceType: t2.micro
+      KeyName: kunal_123
+      UserData: !Base64 >
+        #!/bin/bash 
+
+        cd / 
+
+        cd etc/nginx/sites-available 
+
+        sudo sed -i
+        's+Internal_ELB_DNS+http://internal-backe-Inter-OJTCWB8LCJFO-418023258.us-east-1.elb.amazonaws.com+g'
+        chatapp 
+
+        cd / 
+
+        sudo systemctl restart nginx
+  FrontendASG:
+    Type: 'AWS::AutoScaling::AutoScalingGroup'
+    Properties:
+      AvailabilityZones:
+        - us-east-1a
+      MinSize: '1'
+      MaxSize: '4'
+      DesiredCapacity: '1'
+      HealthCheckGracePeriod: 300
+      TargetGroupARNs:
+        - !Ref ExternalTargetGroup
+      LaunchConfigurationName: !Ref ChatappLaunchConfig
+      VPCZoneIdentifier:
+        - subnet-05a5fda8fa51783e3
+  ChatappCPUPolicy:
+    Type: 'AWS::AutoScaling::ScalingPolicy'
+    Properties:
+      AutoScalingGroupName: !Ref FrontendASG
+      PolicyType: TargetTrackingScaling
+      TargetTrackingConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ASGAverageCPUUtilization
+        TargetValue: 60

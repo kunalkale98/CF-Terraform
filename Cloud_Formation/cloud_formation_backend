@@ -1,0 +1,123 @@
+AWSTemplateFormatVersion: 2010-09-09
+Resources:
+  BackendSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Backend Instance Security Group
+      VpcId: vpc-01db5fa24d42d7539
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: 0.0.0.0/0
+  BackendELBSG:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Backend Instance Security Group
+      VpcId: vpc-01db5fa24d42d7539
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: 0.0.0.0/0
+  InternalLoadBalancer:
+    Type: 'AWS::ElasticLoadBalancingV2::LoadBalancer'
+    Properties:
+      Scheme: internal
+      Subnets:
+        - subnet-0163dbdc5dd02b039
+        - subnet-0820f502dc9ae7ca4
+      SecurityGroups:
+        - !Ref BackendELBSG
+      Tags:
+        - Key: Name
+          Value: InternalLoadBalancer
+  InternalTargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      Port: '8000'
+      Protocol: HTTP
+      VpcId: vpc-01db5fa24d42d7539
+  Listener:
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref InternalTargetGroup
+      LoadBalancerArn: !Ref InternalLoadBalancer
+      Port: '80'
+      Protocol: HTTP
+  ChatappLaunchConfig:
+    Type: 'AWS::AutoScaling::LaunchConfiguration'
+    Properties:
+      ImageId: ami-0b2ebc26bab5bc68d
+      SecurityGroups:
+        - !Ref BackendSecurityGroup
+      InstanceType: t2.micro
+      KeyName: kunal_123
+      UserData: !Base64 >
+        #!/bin/bash
+
+        cd /
+
+        cd new_chatapp/fundoo/fundoo
+
+        sudo echo > .env
+
+        sudo echo "DB_PORT = '3306'" >> .env
+
+        sudo echo "DB_HOST =
+        'chatappdbinstance.cxg414qacf1o.us-east-1.rds.amazonaws.com'" >> .env
+
+        sudo echo "DB_USER = 'kunal'" >> .env
+
+        sudo echo "DB_PASS = 'Kunal2898'" >> .env
+
+        sudo echo "DB_NAME = 'chatappDB'" >> .env
+
+        sudo systemctl restart chatapp.service
+  BackendASG:
+    Type: 'AWS::AutoScaling::AutoScalingGroup'
+    Properties:
+      AvailabilityZones:
+        - us-east-1a
+      MinSize: '1'
+      MaxSize: '4'
+      DesiredCapacity: '1'
+      HealthCheckGracePeriod: 300
+      TargetGroupARNs:
+        - !Ref InternalTargetGroup
+      LaunchConfigurationName: !Ref ChatappLaunchConfig
+      VPCZoneIdentifier:
+        - subnet-0163dbdc5dd02b039
+  ChatappCPUPolicy:
+    Type: 'AWS::AutoScaling::ScalingPolicy'
+    Properties:
+      AutoScalingGroupName: !Ref BackendASG
+      PolicyType: TargetTrackingScaling
+      TargetTrackingConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ASGAverageCPUUtilization
+        TargetValue: 60
